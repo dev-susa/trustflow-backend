@@ -14,7 +14,7 @@ import {
   requestIdMiddleware,
 } from './common/logging/request-context';
 import { SorobanEventIndexerService } from './soroban-event-indexer/soroban-event-indexer.service';
-import { MetricsHttpInterceptor } from './monitoring/metrics-http.interceptor';
+import helmet from 'helmet';
 
 const logger = new SanitizedLogger('Bootstrap');
 
@@ -57,11 +57,23 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   app.use(requestIdMiddleware);
 
-  // Enable shutdown hooks so lifecycle hooks (beforeApplicationShutdown, onApplicationShutdown)
-  // are triggered when the app receives SIGTERM/SIGINT. This ensures BullMQ workers, Redis
-  // subscribers, and the Soroban indexer can complete in-flight operations cleanly during
-  // rolling deployments or pod terminations.
-  app.enableShutdownHooks();
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", 'data:', 'https:'],
+          connectSrc: ["'self'", 'https:'],
+        },
+      },
+    }),
+  );
+
+  // Initialize Sentry via the injectable service so it shares the same instance
+  const sentryService = app.get(SentryService);
+  sentryService.init();
 
   // The whole HTTP-level stack — security headers, body limits, Sentry, the exception
   // filter, request timeouts, metrics, CORS, validation, API versioning, Swagger, and the
