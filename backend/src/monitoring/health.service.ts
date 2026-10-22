@@ -1,14 +1,7 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import {
-  HealthCheckService,
-  HealthIndicatorResult,
-  HealthCheckResult,
-} from '@nestjs/terminus';
-import type { Redis } from 'ioredis';
+import { Redis } from 'ioredis';
 import { DatabaseService } from '../common/database/database.service';
 import { REDIS_CLIENT } from '../common/redis/redis.module';
-import { DrainStateService } from '../common/shutdown/drain-state.service';
-import { config } from '../config/env.config';
 
 export interface HealthStatus {
   status: 'ok' | 'degraded' | 'down';
@@ -34,29 +27,16 @@ export class HealthService {
   constructor(
     @Optional() private readonly database?: DatabaseService,
     @Optional() @Inject(REDIS_CLIENT) private readonly redis?: Redis | null,
-    @Optional() private readonly drainState?: DrainStateService,
-    @Optional() private readonly health?: HealthCheckService,
   ) {}
 
-  async liveness(): Promise<LivenessProbe> {
-    return { status: 'up' };
-  }
-
-  /**
-   * Reports `down` as soon as a shutdown has begun, regardless of dependency health.
-   *
-   * This is the signal that removes the instance from the load balancer's rotation. Without
-   * it, readiness keeps returning 200 until the process has already exited, so the balancer
-   * keeps sending requests into a closing socket — which is how a deploy turns into a burst of
-   * failed transactions.
-   */
-  async readiness(): Promise<ReadinessProbe> {
-    if (this.drainState?.isDraining()) {
-      return { status: 'down', checks: { draining: false } };
-    }
-
-    const checks = await this.runAllChecks();
-    const healthDetails = await this.runTerminusHealthChecks();
+  async check(): Promise<HealthStatus> {
+    const checks: Record<string, boolean> = {
+      api: true,
+      stellar: await this.checkStellar(),
+      database: await this.checkDatabase(),
+      redis: await this.checkRedis(),
+      memory: process.memoryUsage().heapUsed < 500 * 1024 * 1024,
+    };
     const failing = Object.values(checks).filter(v => !v).length;
     return {
       status: failing === 0 ? 'ok' : failing < 2 ? 'degraded' : 'down',
@@ -140,55 +120,13 @@ export class HealthService {
     }
   }
 
-  /**
-   * Run Terminus-based structured health checks for detailed dependency breakdown.
-   * Provides rich JSON health information for DevOps monitoring and Kubernetes probes.
-   */
-  private async runTerminusHealthChecks(): Promise<HealthCheckResult | undefined> {
-    if (!this.health) return undefined;
-
+  /** Redis is optional in local development, but a configured client must be reachable. */
+  private async checkRedis(): Promise<boolean> {
+    if (!this.redis) return true;
     try {
-      return await this.health.check([
-        async (): Promise<HealthIndicatorResult> => this.checkPostgresIndicator(),
-        async (): Promise<HealthIndicatorResult> => this.checkRedisIndicator(),
-        async (): Promise<HealthIndicatorResult> => this.checkSorobanRpcIndicator(),
-      ]);
-    } catch (error) {
-      // Terminus throws on failure — return the error result
-      return error as HealthCheckResult;
+      return (await this.redis.ping()) === 'PONG';
+    } catch {
+      return false;
     }
-  }
-
-  /** Postgres health indicator for Terminus */
-  private async checkPostgresIndicator(): Promise<HealthIndicatorResult> {
-    const isHealthy = await this.checkDatabase();
-    return {
-      postgres: {
-        status: isHealthy ? 'up' : 'down',
-        configured: this.database?.isConfigured ?? false,
-      },
-    };
-  }
-
-  /** Redis health indicator for Terminus */
-  private async checkRedisIndicator(): Promise<HealthIndicatorResult> {
-    const isHealthy = await this.checkRedis();
-    return {
-      redis: {
-        status: isHealthy ? 'up' : 'down',
-        configured: !!this.redis,
-      },
-    };
-  }
-
-  /** Soroban RPC node health indicator for Terminus */
-  private async checkSorobanRpcIndicator(): Promise<HealthIndicatorResult> {
-    const isHealthy = await this.checkStellar();
-    return {
-      soroban_rpc: {
-        status: isHealthy ? 'up' : 'down',
-        url: config.STELLAR_HORIZON_URL,
-      },
-    };
   }
 }

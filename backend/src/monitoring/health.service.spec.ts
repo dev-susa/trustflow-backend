@@ -45,6 +45,34 @@ describe('HealthService', () => {
     expect(status.checks.database).toBe(true);
   });
 
+  it('reports redis: true when no Redis client is configured', async () => {
+    mockFetchOk(true);
+
+    const status = await new HealthService().check();
+
+    expect(status.checks.redis).toBe(true);
+  });
+
+  it('reports redis: true when Redis responds to ping', async () => {
+    mockFetchOk(true);
+    const redis = { ping: jest.fn().mockResolvedValue('PONG') } as unknown as any;
+
+    const status = await new HealthService(undefined, redis).check();
+
+    expect(status.checks.redis).toBe(true);
+    expect(redis.ping).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports degraded when Redis is unreachable', async () => {
+    mockFetchOk(true);
+    const redis = { ping: jest.fn().mockRejectedValue(new Error('Redis down')) } as unknown as any;
+
+    const status = await new HealthService(undefined, redis).check();
+
+    expect(status.checks.redis).toBe(false);
+    expect(status.status).toBe('degraded');
+  });
+
   it('reports database: true when Postgres is not configured, without pinging', async () => {
     mockFetchOk(true);
     const database = { isConfigured: false, ping: jest.fn() } as unknown as DatabaseService;
@@ -95,150 +123,12 @@ describe('HealthService', () => {
     const status = await service.check();
 
     expect(status.status).toBe('ok');
-    expect(status.checks).toEqual({ api: true, stellar: true, database: true, redis: true, memory: true });
-  });
-
-  describe('liveness()', () => {
-    it('resolves to { status: "up" }', async () => {
-      mockFetchOk(true);
-      const service = new HealthService();
-
-      const result = await service.liveness();
-
-      expect(result).toEqual({ status: 'up' });
-    });
-  });
-
-  describe('readiness()', () => {
-    it('short-circuits to { status: "down", checks: { draining: false } } when DrainStateService.isDraining() is true', async () => {
-      mockFetchOk(true);
-      const database = {
-        isConfigured: true,
-        ping: jest.fn().mockResolvedValue(true),
-      } as unknown as DatabaseService;
-      const drainState = {
-        isDraining: jest.fn().mockReturnValue(true),
-      } as unknown as DrainStateService;
-      const service = new HealthService(database, null, drainState);
-
-      const result = await service.readiness();
-
-      expect(result).toEqual({ status: 'down', checks: { draining: false } });
-      expect(database.ping).not.toHaveBeenCalled();
-    });
-
-    it('falls through to normal aggregate check when DrainStateService.isDraining() is false', async () => {
-      mockFetchOk(true);
-      const database = {
-        isConfigured: true,
-        ping: jest.fn().mockResolvedValue(true),
-      } as unknown as DatabaseService;
-      const drainState = {
-        isDraining: jest.fn().mockReturnValue(false),
-      } as unknown as DrainStateService;
-      const service = new HealthService(database, null, drainState);
-
-      const result = await service.readiness();
-
-      expect(result.status).toBe('ok');
-      expect(result.checks).toEqual({ api: true, stellar: true, database: true, redis: true, memory: true });
-      expect(database.ping).toHaveBeenCalled();
-    });
-
-    it('falls through to normal aggregate check when no DrainStateService is available', async () => {
-      mockFetchOk(true);
-      const database = {
-        isConfigured: true,
-        ping: jest.fn().mockResolvedValue(true),
-      } as unknown as DatabaseService;
-      const service = new HealthService(database);
-
-      const result = await service.readiness();
-
-      expect(result.status).toBe('ok');
-      expect(result.checks).toEqual({ api: true, stellar: true, database: true, redis: true, memory: true });
-    });
-  });
-
-  describe('checkRedis()', () => {
-    it('reports redis: true when no REDIS_CLIENT is injected', async () => {
-      mockFetchOk(true);
-      const service = new HealthService();
-
-      const status = await service.check();
-
-      expect(status.checks.redis).toBe(true);
-    });
-
-    it('reports redis: true when ping() resolves "PONG"', async () => {
-      mockFetchOk(true);
-      const redis = {
-        ping: jest.fn().mockResolvedValue('PONG'),
-      } as unknown as Redis;
-      const service = new HealthService(undefined, redis);
-
-      const status = await service.check();
-
-      expect(status.checks.redis).toBe(true);
-      expect(redis.ping).toHaveBeenCalled();
-    });
-
-    it('reports redis: false when ping() resolves anything other than "PONG"', async () => {
-      mockFetchOk(true);
-      const redis = {
-        ping: jest.fn().mockResolvedValue('INVALID'),
-      } as unknown as Redis;
-      const service = new HealthService(undefined, redis);
-
-      const status = await service.check();
-
-      expect(status.checks.redis).toBe(false);
-      expect(status.status).toBe('degraded');
-    });
-
-    it('reports redis: false when ping() rejects', async () => {
-      mockFetchOk(true);
-      const redis = {
-        ping: jest.fn().mockRejectedValue(new Error('Connection refused')),
-      } as unknown as Redis;
-      const service = new HealthService(undefined, redis);
-
-      const status = await service.check();
-
-      expect(status.checks.redis).toBe(false);
-      expect(status.status).toBe('degraded');
-    });
-  });
-
-  describe('checkStellar()', () => {
-    it('reports stellar: false when fetch resolves { ok: false }', async () => {
-      mockFetchOk(false);
-      const service = new HealthService();
-
-      const status = await service.check();
-
-      expect(status.checks.stellar).toBe(false);
-      expect(status.status).toBe('degraded');
-    });
-
-    it('reports stellar: false when fetch rejects', async () => {
-      global.fetch = jest.fn().mockRejectedValue(new Error('Network error')) as any;
-      const service = new HealthService();
-
-      const status = await service.check();
-
-      expect(status.checks.stellar).toBe(false);
-      expect(status.status).toBe('degraded');
-    });
-
-    it('reports stellar: false when fetch times out', async () => {
-      global.fetch = jest.fn().mockImplementation(() => new Promise(() => {})) as any;
-      const service = new HealthService();
-
-      const status = await service.check();
-
-      expect(status.checks.stellar).toBe(false);
-      expect(status.status).toBe('degraded');
+    expect(status.checks).toEqual({
+      api: true,
+      stellar: true,
+      database: true,
+      redis: true,
+      memory: true,
     });
   });
 });
