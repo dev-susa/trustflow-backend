@@ -1,21 +1,22 @@
-import { ArgumentsHost, HttpException, HttpStatus } from '@nestjs/common';
+import { ArgumentsHost, HttpException, HttpStatus, Logger } from '@nestjs/common';
+import * as Sentry from '@sentry/node';
 import { SentryExceptionFilter } from './sentry-exception.filter';
 import { SentryService } from '../../sentry/sentry.service';
+import { enableRequestContextLogging, runWithRequestContext } from '../logging/request-context';
 
-jest.mock('@sentry/node', () => ({
-  captureException: jest.fn(),
-  withScope: jest.fn((cb: (scope: unknown) => unknown) => {
-    const scope = { setTag: jest.fn(), setExtra: jest.fn(), setUser: jest.fn() };
-    return cb(scope);
-  }),
-}));
-
-function buildHost(url = '/test', method = 'GET', ip = '127.0.0.1') {
+function buildHost(
+  url = '/test',
+  method = 'GET',
+  ip = '127.0.0.1',
+  requestId?: string,
+) {
   const response = {
     status: jest.fn().mockReturnThis(),
     json: jest.fn(),
+    setHeader: jest.fn(),
   };
-  const request = { url, method, ip };
+  const headers = requestId ? { 'x-request-id': requestId } : {};
+  const request = { url, method, ip, headers, get: (name: string) => headers[name.toLowerCase()] };
   return {
     switchToHttp: () => ({
       getResponse: () => response,
@@ -32,6 +33,7 @@ describe('SentryExceptionFilter', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    enableRequestContextLogging();
     sentryService = {
       captureException: jest.fn().mockReturnValue('evt-id'),
       isInitialized: jest.fn().mockReturnValue(true),
@@ -185,5 +187,31 @@ describe('SentryExceptionFilter', () => {
       expect(body).toHaveProperty('path', '/api/auth/login');
       expect(body).toHaveProperty('statusCode', 500);
     });
+  });
+
+  it('should propagate the request id to the logger and Sentry tags for the same request', () => {
+    const requestId = 'req-123';
+    const setTag = jest.fn();
+    const setExtra = jest.fn();
+    const setUser = jest.fn();
+    const withScopeSpy = jest.spyOn(Sentry, 'withScope' as never).mockImplementation(
+      ((scopeOrCallback: unknown, callback?: (scope: any) => unknown) => {
+        const scope = { setTag, setExtra, setUser };
+        if (typeof scopeOrCallback === 'function') {
+          return (scopeOrCallback as (scope: any) => unknown)(scope);
+        }
+        return callback ? callback(scope) : undefined;
+      }) as never,
+    );
+    const logSpy = jest.spyOn(Logger.prototype, 'error');
+
+    runWithRequestContext(requestId, () => {
+      filter.catch(new Error('crash'), buildHost('/api/auth/login', 'POST', '127.0.0.1', requestId));
+    });
+
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining(`requestId=${requestId}`), expect.any(String));
+    expect(setTag).toHaveBeenCalledWith('request_id', requestId);
+    expect(setTag).toHaveBeenCalledWith('correlation_id', requestId);
+    expect(withScopeSpy).toHaveBeenCalled();
   });
 });

@@ -10,6 +10,7 @@ import { SanitizedLogger } from '../logging/sanitized-logger';
 import { redactIp, redactUrl } from '../logging/redaction';
 import { Request, Response } from 'express';
 import * as Sentry from '@sentry/node';
+import { getRequestId } from '../logging/request-context';
 import { SentryService } from '../../sentry/sentry.service';
 import { CorrelationIdStore } from '../logging/correlation-id.store';
 import {
@@ -53,7 +54,8 @@ export class SentryExceptionFilter implements ExceptionFilter {
 
     const ctx = host.switchToHttp();
     const response = ctx.getResponse<Response>();
-    const request = ctx.getRequest<Request & { correlationId?: string }>();
+    const request = ctx.getRequest<Request>();
+    const requestId = getRequestId(request);
 
     let status: number;
     let message: string;
@@ -100,15 +102,14 @@ export class SentryExceptionFilter implements ExceptionFilter {
       Sentry.withScope(scope => {
         scope.setTag('url', safeUrl);
         scope.setTag('method', request.method);
-        if (correlationId) {
-          scope.setTag('correlationId', correlationId);
-        }
+        scope.setTag('request_id', requestId);
+        scope.setTag('correlation_id', requestId);
         scope.setExtra('statusCode', status);
         scope.setUser({ ip_address: redactIp(request.ip) });
         this.sentryService.captureException(exception, 'SentryExceptionFilter');
       });
       this.logger.error(
-        `[${request.method}] ${safeUrl} correlationId=${correlationId ?? 'n/a'} — ${status}`,
+        `[${request.method}] ${request.url} — ${status} — requestId=${requestId}`,
         exception instanceof Error ? exception.stack : String(exception),
       );
     }

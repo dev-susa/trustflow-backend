@@ -8,7 +8,13 @@ import { validateEnv, config } from './config/env.config';
 import { ShutdownService } from './common/shutdown/shutdown.service';
 import { SanitizedLogger } from './common/logging/sanitized-logger';
 import { SentryService } from './sentry/sentry.service';
-import { createDocsBasicAuth, isSwaggerEnabled } from './common/http/docs-security';
+import { SentryExceptionFilter } from './common/filters/sentry-exception.filter';
+import {
+  enableRequestContextLogging,
+  requestIdMiddleware,
+} from './common/logging/request-context';
+import { SorobanEventIndexerService } from './soroban-event-indexer/soroban-event-indexer.service';
+import { MetricsHttpInterceptor } from './monitoring/metrics-http.interceptor';
 
 const logger = new SanitizedLogger('Bootstrap');
 
@@ -46,11 +52,10 @@ process.on('uncaughtException', (error: Error) => {
 });
 
 async function bootstrap() {
-  // Start OTel before creating the Nest app so auto-instrumentation patches
-  // HTTP / pg / ioredis before any of those modules are required.
-  const otelSdk = initTracing();
+  enableRequestContextLogging();
 
   const app = await NestFactory.create(AppModule);
+  app.use(requestIdMiddleware);
 
   // Enable shutdown hooks so lifecycle hooks (beforeApplicationShutdown, onApplicationShutdown)
   // are triggered when the app receives SIGTERM/SIGINT. This ensures BullMQ workers, Redis
