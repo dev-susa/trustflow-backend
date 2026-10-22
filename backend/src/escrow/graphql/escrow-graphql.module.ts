@@ -2,13 +2,8 @@ import { Module } from '@nestjs/common';
 import { GraphQLModule } from '@nestjs/graphql';
 import { ApolloDriver, ApolloDriverConfig } from '@nestjs/apollo';
 import { join } from 'path';
-import {
-  EscrowResolver,
-  MilestoneResolver,
-  DeliverableResolver,
-  EscrowPage,
-} from './escrow.resolver';
-import { EscrowModule } from '../escrow.module';
+import { EscrowResolver, MilestoneResolver, DeliverableResolver, EscrowPage } from './escrow.resolver';
+import { EscrowService } from '../escrow.service';
 import { EscrowType } from './types/escrow.type';
 import { MilestoneType } from './types/milestone.type';
 import { DeliverableType } from './types/deliverable.type';
@@ -23,8 +18,14 @@ import { config } from '../../config/env.config';
       driver: ApolloDriver,
       autoSchemaFile: join(process.cwd(), 'src/escrow/graphql/schema.gql'),
       sortSchema: true,
-      playground: config.NODE_ENV !== 'production',
-      context: ({ req, res }: { req: unknown; res: unknown }) => ({ req, res }),
+      playground: (() => {
+        try {
+          return config.NODE_ENV !== 'production';
+        } catch {
+          return true;
+        }
+      })(),
+      context: ({ req, res }: { req?: unknown; res?: unknown }) => ({ req, res }),
     }),
     DataLoaderModule,
     EscrowModule,
@@ -34,6 +35,7 @@ import { config } from '../../config/env.config';
     MilestoneResolver,
     DeliverableResolver,
     EscrowPage,
+    EscrowService,
     EscrowType,
     MilestoneType,
     DeliverableType,
