@@ -14,7 +14,7 @@ import {
   requestIdMiddleware,
 } from './common/logging/request-context';
 import { SorobanEventIndexerService } from './soroban-event-indexer/soroban-event-indexer.service';
-import helmet from 'helmet';
+import { getCorsOrigin } from './cors.util';
 
 const logger = new SanitizedLogger('Bootstrap');
 
@@ -75,17 +75,13 @@ async function bootstrap() {
   const sentryService = app.get(SentryService);
   sentryService.init();
 
-  // The whole HTTP-level stack — security headers, body limits, Sentry, the exception
-  // filter, request timeouts, metrics, CORS, validation, API versioning, Swagger, and the
-  // Soroban indexer — is applied by `configureApp`. This used to be duplicated inline here
-  // and the copy had drifted badly: it referenced eight identifiers it never imported
-  // (including `express`, so the server died with `ReferenceError: express is not defined`
-  // on startup) and had silently dropped API versioning and the global request timeout.
-  // Sharing one implementation is what keeps production and the test suites in agreement.
-  const docsAuth = createDocsBasicAuth(config.SWAGGER_USER, config.SWAGGER_PASSWORD);
-  configureApp(app, {
-    skipSwagger: !isSwaggerEnabled(config),
-    ...(docsAuth ? { docsAuth } : {}),
+  // Register global exception filter — captures 5xx errors to Sentry
+  app.useGlobalFilters(new SentryExceptionFilter(sentryService));
+
+  // Enable CORS
+  app.enableCors({
+    origin: getCorsOrigin(),
+    credentials: true,
   });
 
   const swaggerEnabled = isSwaggerEnabled(config);
