@@ -8,7 +8,7 @@ import {
   DeliverableResolver,
   EscrowPage,
 } from './escrow.resolver';
-import { EscrowService } from '../escrow.service';
+import { EscrowModule } from '../escrow.module';
 import { EscrowType } from './types/escrow.type';
 import { MilestoneType } from './types/milestone.type';
 import { DeliverableType } from './types/deliverable.type';
@@ -27,13 +27,13 @@ import { config } from '../../config/env.config';
       context: ({ req, res }: { req: unknown; res: unknown }) => ({ req, res }),
     }),
     DataLoaderModule,
+    EscrowModule,
   ],
   providers: [
     EscrowResolver,
     MilestoneResolver,
     DeliverableResolver,
     EscrowPage,
-    EscrowService,
     EscrowType,
     MilestoneType,
     DeliverableType,

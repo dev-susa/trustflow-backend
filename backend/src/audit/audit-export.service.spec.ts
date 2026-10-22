@@ -125,6 +125,12 @@ describe('AuditExportService', () => {
       const checksum = await service.computeChecksum(stream);
       expect(checksum).toMatch(/^[a-f0-9]{64}$/);
     });
+
+    it('does not return a checksum field that is always empty when read', async () => {
+      mockDb.query.mockResolvedValue({ rows: [], rowCount: 0, command: 'SELECT', oid: 0, fields: [] });
+      const result = await service.exportLogs({ format: 'csv' });
+      expect(result).not.toHaveProperty('checksum');
+    });
   });
 
   describe('filtering', () => {

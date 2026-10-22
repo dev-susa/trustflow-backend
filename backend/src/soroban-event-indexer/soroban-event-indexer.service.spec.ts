@@ -4,6 +4,10 @@ import { REDIS_CLIENT } from '../common/redis/redis.module';
 import { rpc as SorobanRpc, nativeToScVal, scValToNative } from '@stellar/stellar-sdk';
 import { Redis } from 'ioredis';
 import * as stellarConfig from '../stellar/stellar.config';
+import { validateEnv } from '../config/env.config';
+
+// poll() reads the validated env config, so it must be initialised before any test runs.
+validateEnv();
 
 jest.mock('@stellar/stellar-sdk', () => {
   const original = jest.requireActual('@stellar/stellar-sdk');
@@ -65,11 +69,12 @@ describe('SorobanEventIndexerService (Unit)', () => {
     expect(rpcServerMock.getHealth).not.toHaveBeenCalled();
   });
 
-  it('poll() returns empty if nothing new (startLedger > endLedger)', async () => {
-    rpcServerMock.getHealth.mockResolvedValue({ latestLedger: 0, oldestLedger: 0 });
+  it('poll() returns empty if the RPC reports no events', async () => {
+    rpcServerMock.getHealth.mockResolvedValue({ latestLedger: 10, oldestLedger: 1 });
+    rpcServerMock.getEvents.mockResolvedValue({ events: [] });
     const events = await service.poll();
     expect(events).toEqual([]);
-    expect(rpcServerMock.getEvents).not.toHaveBeenCalled();
+    expect(rpcServerMock.getEvents).toHaveBeenCalledTimes(1);
   });
 
   it('poll() fetches and parses events without Redis (null client)', async () => {
@@ -98,17 +103,70 @@ describe('SorobanEventIndexerService (Unit)', () => {
 
     const localService = new SorobanEventIndexerService(redisMock as any);
 
+    // Limits below 1 are clamped up to 1.
     await localService.getEvents(0);
-    expect(redisMock.zrevrange).toHaveBeenLastCalledWith('soroban:events:index', 0, 49);
+    expect(redisMock.zrevrange).toHaveBeenLastCalledWith('soroban:events:index', 0, 0);
 
     await localService.getEvents(-5);
-    expect(redisMock.zrevrange).toHaveBeenLastCalledWith('soroban:events:index', 0, 49);
+    expect(redisMock.zrevrange).toHaveBeenLastCalledWith('soroban:events:index', 0, 0);
 
     await localService.getEvents(Number.MAX_SAFE_INTEGER);
     expect(redisMock.zrevrange).toHaveBeenLastCalledWith('soroban:events:index', 0, 199);
 
     await localService.getEvents();
     expect(redisMock.zrevrange).toHaveBeenLastCalledWith('soroban:events:index', 0, 49);
+  });
+
+  it('skips an interval tick while the previous poll is still in flight', async () => {
+    jest.useFakeTimers();
+    try {
+      let resolveHealth!: (value: unknown) => void;
+      rpcServerMock.getHealth.mockImplementation(
+        () => new Promise(resolve => (resolveHealth = resolve)),
+      );
+      rpcServerMock.getEvents.mockResolvedValue({ events: [] });
+
+      const flushPromises = async () => {
+        for (let i = 0; i < 50; i++) await Promise.resolve();
+      };
+
+      service.start();
+      await flushPromises();
+      expect(rpcServerMock.getHealth).toHaveBeenCalledTimes(1);
+
+      // The first poll is still awaiting getHealth, so the next tick must not start another.
+      jest.advanceTimersByTime((service as any).POLL_INTERVAL_MS);
+      await flushPromises();
+      expect(rpcServerMock.getHealth).toHaveBeenCalledTimes(1);
+
+      // Once the slow poll settles, the following tick runs a new poll again.
+      resolveHealth({ latestLedger: 0, oldestLedger: 0 });
+      await flushPromises();
+      expect((service as any).currentPoll).toBeNull();
+
+      jest.advanceTimersByTime((service as any).POLL_INTERVAL_MS);
+      await flushPromises();
+      expect(rpcServerMock.getHealth).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('setCursor() never moves the stored cursor backward', async () => {
+    const redisMock = {
+      get: jest.fn().mockResolvedValue('150'),
+      set: jest.fn().mockResolvedValue('OK'),
+    };
+    const localService = new SorobanEventIndexerService(redisMock as any);
+
+    await (localService as any).setCursor(110);
+    expect(redisMock.set).not.toHaveBeenCalled();
+
+    await (localService as any).setCursor(150);
+    expect(redisMock.set).not.toHaveBeenCalled();
+
+    await (localService as any).setCursor(200);
+    expect(redisMock.set).toHaveBeenCalledWith('soroban:event-indexer:cursor', '200');
   });
 });
 

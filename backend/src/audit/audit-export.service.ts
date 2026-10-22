@@ -14,7 +14,6 @@ export interface AuditExportFilters {
 
 export interface AuditExportResult {
   stream: Readable;
-  checksum: string;
   contentType: string;
   filename: string;
 }
@@ -56,7 +55,6 @@ export class AuditExportService {
     const extension = format;
     const filename = `audit-logs-${new Date().toISOString().slice(0, 10)}.${extension}`;
 
-    const hash = crypto.createHash('sha256');
     let rowCount = 0;
 
     const stream = new Readable({
@@ -66,7 +64,7 @@ export class AuditExportService {
     });
 
     // Asynchronously start producing data
-    this._produceData(stream, hash, filters, format, () => rowCount)
+    this._produceData(stream, filters, format, () => rowCount)
       .then(count => {
         rowCount = count;
         this.logger.log(`Audit export completed: ${count} rows, format=${format}`);
@@ -76,28 +74,11 @@ export class AuditExportService {
         stream.destroy(err);
       });
 
-    // We need to return the checksum after streaming completes, but the caller
-    // needs it upfront for the header. So we use a wrapper approach:
-    // The stream emits a 'checksum' event when done. For the response header,
-    // we compute it lazily via a proxy object.
-    const result: AuditExportResult = {
-      stream,
-      checksum: '', // Will be set when stream completes
-      contentType,
-      filename,
-    };
-
-    // Attach a listener to update the checksum when the stream finishes
-    stream.on('end', () => {
-      result.checksum = hash.digest('hex');
-    });
-
-    return result;
+    return { stream, contentType, filename };
   }
 
   private async _produceData(
     stream: Readable,
-    hash: crypto.Hash,
     filters: AuditExportFilters,
     format: 'csv' | 'json',
     _getCount: () => number,
@@ -130,12 +111,9 @@ export class AuditExportService {
 
     if (!this.db.isConfigured) {
       if (format === 'csv') {
-        const header = CSV_HEADERS.join(',') + '\n';
-        stream.push(header);
-        hash.update(header);
+        stream.push(CSV_HEADERS.join(',') + '\n');
       } else {
         stream.push('[]');
-        hash.update('[]');
       }
       stream.push(null);
       return 0;
@@ -146,31 +124,23 @@ export class AuditExportService {
       const rows = result.rows;
 
       if (format === 'csv') {
-        const header = CSV_HEADERS.join(',') + '\n';
-        stream.push(header);
-        hash.update(header);
+        stream.push(CSV_HEADERS.join(',') + '\n');
 
         for (const row of rows) {
-          const line = formatCsvRow(row as Record<string, unknown>);
-          stream.push(line);
-          hash.update(line);
+          stream.push(formatCsvRow(row as Record<string, unknown>));
         }
       } else {
         // JSON array format — stream each row as we go
         let first = true;
         stream.push('[');
-        hash.update('[');
 
         for (const row of rows) {
           const prefix = first ? '' : ',';
-          const json = JSON.stringify(row);
-          stream.push(prefix + json);
-          hash.update(prefix + json);
+          stream.push(prefix + JSON.stringify(row));
           first = false;
         }
 
         stream.push(']');
-        hash.update(']');
       }
 
       stream.push(null);

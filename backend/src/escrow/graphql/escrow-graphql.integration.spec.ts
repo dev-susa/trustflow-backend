@@ -1,7 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
-import { INestApplication } from '@nestjs/common';
+import { Global, INestApplication, Module } from '@nestjs/common';
 import { validateEnv } from '../../config/env.config';
+import { REDIS_CLIENT } from '../../common/redis/redis.constants';
 import { EscrowService } from '../escrow.service';
 import { MilestoneLoader } from './dataloader/milestone.loader';
 import { DeliverableLoader } from './dataloader/deliverable.loader';
@@ -15,6 +16,15 @@ validateEnv();
 const { EscrowGraphQLModule } = require('./escrow-graphql.module') as typeof import('./escrow-graphql.module');
 
 // ─── Mocks ────────────────────────────────────────────────────────────────────
+
+// EscrowModule (now imported by the GraphQL module) pulls in WebhookModule, which injects
+// REDIS_CLIENT from a global module. Provide the in-memory fallback (null) for these tests.
+@Global()
+@Module({
+  providers: [{ provide: REDIS_CLIENT, useValue: null }],
+  exports: [REDIS_CLIENT],
+})
+class TestRedisModule {}
 
 const mockEscrowService = {
   findAll: jest.fn(),
@@ -44,7 +54,7 @@ describe('EscrowGraphQL Integration', () => {
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      imports: [EscrowGraphQLModule],
+      imports: [TestRedisModule, EscrowGraphQLModule],
     })
       .overrideProvider(EscrowService)
       .useValue(mockEscrowService)

@@ -55,6 +55,12 @@ export class SorobanEventIndexerService implements OnModuleInit, OnModuleDestroy
     this.isRunning = true;
 
     const run = async () => {
+      // Skip this tick if a previous poll is still in flight, so slow RPC calls
+      // never let two polls race on the same cursor.
+      if (this.currentPoll) {
+        this.logger.warn('Skipping Soroban poll: previous poll still in flight');
+        return;
+      }
       try {
         this.currentPoll = this.poll();
         await this.currentPoll;
@@ -214,6 +220,10 @@ export class SorobanEventIndexerService implements OnModuleInit, OnModuleDestroy
   private async setCursor(ledger: number): Promise<void> {
     if (!this.redis) return;
     try {
+      // Only ever advance the cursor. A stale write must never move it backward.
+      const raw = await this.redis.get(CURSOR_KEY);
+      const current = raw ? parseInt(raw, 10) : 0;
+      if (ledger <= current) return;
       await this.redis.set(CURSOR_KEY, ledger.toString());
     } catch {
       // best effort
