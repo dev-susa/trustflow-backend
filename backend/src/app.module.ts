@@ -5,6 +5,7 @@ import { CorrelationIdMiddleware } from './common/logging/correlation-id.middlew
 import { ShutdownModule } from './common/shutdown/shutdown.module';
 import { DrainMiddleware } from './common/shutdown/drain.middleware';
 import { RedisModule } from './common/redis/redis.module';
+import { CacheModule } from './common/cache.module';
 import { DatabaseModule } from './common/database/database.module';
 import { RateLimitModule } from './common/rate-limit/rate-limit.module';
 import { IdempotencyModule } from './common/idempotency/idempotency.module';
@@ -41,6 +42,7 @@ import { CacheModule } from './common/cache.module';
     ShutdownModule,
     SentryModule,
     RedisModule,
+    CacheModule,
     DatabaseModule,
     RateLimitModule,
     IdempotencyModule,
