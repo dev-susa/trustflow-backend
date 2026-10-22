@@ -17,6 +17,8 @@ describe('EventIngestionService', () => {
   const mockEscrowService = {
     create: jest.fn(),
     findById: jest.fn(),
+    findByContractEscrowId: jest.fn(),
+    fund: jest.fn(),
     release: jest.fn(),
     raiseDispute: jest.fn(),
   };
@@ -206,6 +208,40 @@ describe('EventIngestionService', () => {
 
       expect(processSpy).not.toHaveBeenCalled();
       expect(results).toHaveLength(0);
+    });
+
+    it('should clear the failed record before re-processing so processEvent can actually retry', async () => {
+      const originalEvent = {
+        id: 'event-1',
+        ledger: 100,
+        contractId: 'test-contract',
+        eventType: 'escrow_funded',
+        topic: ['escrow_funded', 'escrow-123'],
+        value: { contractEscrowId: 'escrow-123' },
+        xdr: 'xdr-data',
+        createdAt: new Date(),
+      };
+
+      // Simulate a previously failed event
+      await eventProcessorService.processEvent(originalEvent);
+      const failedEvents = await eventProcessorService.getFailedEvents();
+      expect(failedEvents).toHaveLength(1);
+      expect(failedEvents[0].success).toBe(false);
+
+      // Mock escrowService to succeed on retry
+      mockEscrowService.findByContractEscrowId = jest.fn().mockResolvedValue({
+        id: 'db-escrow-123',
+        contractEscrowId: 'escrow-123',
+        status: 'pending',
+      });
+      mockEscrowService.fund = jest.fn().mockResolvedValue(undefined);
+
+      // Retry should clear the failed record and actually re-run the handler
+      const results = await service.retryFailedEvents();
+
+      expect(results).toHaveLength(1);
+      expect(results[0].success).toBe(true);
+      expect(mockEscrowService.fund).toHaveBeenCalledWith('db-escrow-123');
     });
   });
 });

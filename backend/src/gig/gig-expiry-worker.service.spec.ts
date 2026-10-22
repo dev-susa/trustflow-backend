@@ -48,6 +48,7 @@ function makeGig(id: string, status: GigStatus): Gig {
     status,
     createdAt: '2026-01-01T00:00:00.000Z',
     respondBy: '2026-01-01T01:00:00.000Z',
+    version: 1,
   };
 }
 

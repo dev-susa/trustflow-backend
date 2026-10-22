@@ -382,23 +382,8 @@ export class EventIngestionService implements OnModuleInit, OnModuleDestroy {
   }
 
   async retryFailedEvents(): Promise<ProcessedEvent[]> {
-    const failedEvents = await this.eventProcessorService.getFailedEvents();
-    const results: ProcessedEvent[] = [];
-
-    for (const failedEvent of failedEvents) {
-      // Use the original event data if available, otherwise skip
-      if (!failedEvent.originalEvent) {
-        this.logger.warn(
-          `Failed event ${failedEvent.eventId} has no original event data, skipping retry`,
-        );
-        continue;
-      }
-
-      // Re-process with the original event data
-      const result = await this.eventProcessorService.processEvent(failedEvent.originalEvent);
-      results.push(result);
-    }
-
-    return results;
+    // Delegate to EventProcessorService.retryFailedEvents() which correctly clears
+    // the stale failed record before re-invoking processEvent (#778).
+    return this.eventProcessorService.retryFailedEvents();
   }
 }
