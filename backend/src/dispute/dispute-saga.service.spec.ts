@@ -162,6 +162,7 @@ describe('DisputeSagaService', () => {
       const firstSaga = await service.escalate('esc-001', ESCALATE_DTO);
       // Simulate completion
       firstSaga.currentStep = DisputeStep.COMPLETED;
+      escrow.status = 'active';
 
       const secondSaga = await service.escalate('esc-001', ESCALATE_DTO);
       expect(secondSaga.sagaId).not.toBe(firstSaga.sagaId);
@@ -176,6 +177,7 @@ describe('DisputeSagaService', () => {
       const firstSaga = await service.escalate('esc-001', ESCALATE_DTO);
       // Simulate failure
       firstSaga.currentStep = DisputeStep.FAILED;
+      escrow.status = 'active';
 
       const secondSaga = await service.escalate('esc-001', ESCALATE_DTO);
       expect(secondSaga.sagaId).not.toBe(firstSaga.sagaId);
@@ -216,6 +218,27 @@ describe('DisputeSagaService', () => {
     it('throws BadRequestException when escrow is already released', async () => {
       escrowService.findById.mockResolvedValueOnce(makeEscrow({ status: 'released' }));
       await expect(service.escalate('esc-001', ESCALATE_DTO)).rejects.toThrow(BadRequestException);
+    });
+
+    it.each(['pending', 'disputed', 'cancelled'] as const)(
+      'rejects API escalation when escrow status is %s',
+      async status => {
+        escrowService.findById.mockResolvedValueOnce(makeEscrow({ status }));
+        await expect(service.escalate('esc-001', ESCALATE_DTO)).rejects.toThrow(
+          BadRequestException,
+        );
+        expect(escrowService.raiseDispute).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rejects an initiator who is not a party to the escrow', async () => {
+      await expect(
+        service.escalate('esc-001', {
+          ...ESCALATE_DTO,
+          initiator: 'GOTHERWALLETAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(escrowService.raiseDispute).not.toHaveBeenCalled();
     });
 
     it('throws ConflictException when an active saga already exists', async () => {

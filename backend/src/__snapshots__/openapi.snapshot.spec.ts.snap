@@ -1974,7 +1974,7 @@ exports[`OpenAPI document matches the checked-in snapshot 1`] = `
     },
     "/escrows/{id}/dispute": {
       "post": {
-        "description": "Raises a dispute for an escrow. Triggers webhook events and Discord notifications to alert jurors.",
+        "description": "Raises a dispute for an active escrow as the authenticated depositor or beneficiary. Starts the dispute saga, which freezes the escrow and notifies jurors.",
         "operationId": "EscrowController_raiseDispute",
         "parameters": [
           {
@@ -2011,35 +2011,30 @@ exports[`OpenAPI document matches the checked-in snapshot 1`] = `
             "content": {
               "application/json": {
                 "schema": {
-                  "properties": {
-                    "disputeReason": {
-                      "type": "string",
-                    },
-                    "disputedAt": {
-                      "format": "date-time",
-                      "type": "string",
-                    },
-                    "id": {
-                      "type": "string",
-                    },
-                    "status": {
-                      "example": "disputed",
-                      "type": "string",
-                    },
-                  },
-                  "type": "object",
+                  "$ref": "#/components/schemas/DisputeSagaResponseDto",
                 },
               },
             },
-            "description": "Dispute raised successfully. Discord notification sent if configured.",
+            "description": "Dispute saga started successfully.",
           },
           "400": {
-            "description": "Escrow already disputed or released",
+            "description": "Escrow is not active",
+          },
+          "401": {
+            "description": "Authentication required",
+          },
+          "403": {
+            "description": "Only the depositor or beneficiary can raise a dispute",
           },
           "404": {
             "description": "Escrow not found",
           },
         },
+        "security": [
+          {
+            "JWT-auth": [],
+          },
+        ],
         "summary": "Raise a dispute",
         "tags": [
           "Escrow",

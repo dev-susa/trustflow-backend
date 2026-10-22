@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { DisputeSagaService } from './dispute-saga.service';
 import { DisputeSagaController } from './dispute-saga.controller';
 import { EscrowDisputeController } from './escrow-dispute.controller';
@@ -10,9 +10,15 @@ import { NotificationModule } from '../notification/notification.module';
 import { MonitoringModule } from '../monitoring/monitoring.module';
 
 @Module({
-  imports: [EscrowModule, WebhookModule, ReputationModule, NotificationModule, MonitoringModule],
-  controllers: [DisputeSagaController, EscrowDisputeController],
-  providers: [DisputeSagaService, ArweaveArchiveService],
-  exports: [DisputeSagaService, ArweaveArchiveService],
+  imports: [
+    forwardRef(() => EscrowModule),
+    WebhookModule,
+    ReputationModule,
+    NotificationModule,
+    MonitoringModule,
+  ],
+  controllers: [DisputeSagaController],
+  providers: [DisputeSagaService],
+  exports: [DisputeSagaService],
 })
 export class DisputeModule {}
