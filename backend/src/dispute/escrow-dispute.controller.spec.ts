@@ -3,6 +3,7 @@ import { BadRequestException, ForbiddenException } from '@nestjs/common';
 import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { EscrowDisputeController } from './escrow-dispute.controller';
 import { DisputeSagaService } from './dispute-saga.service';
+import { ArweaveArchiveService } from './arweave-archive.service';
 import { DisputeStep } from './dispute.types';
 import { JwtAuthGuard } from '../auth/auth.guard';
 import { Escrow, EscrowService, EscrowStatus } from '../escrow/escrow.service';
@@ -53,7 +54,7 @@ describe('EscrowDisputeController', () => {
     };
     webhookService = { dispatch: jest.fn().mockResolvedValue(undefined) };
     discordService = { notifyDisputeNeedsJurors: jest.fn().mockResolvedValue(undefined) };
-    notificationService = { notifyDisputeEscalated: jest.fn().mockResolvedValue(undefined) };
+    notificationService = { notifyDisputeEscalation: jest.fn().mockResolvedValue(undefined) };
 
     const module = await Test.createTestingModule({
       controllers: [EscrowDisputeController],
@@ -65,6 +66,7 @@ describe('EscrowDisputeController', () => {
         { provide: NotificationService, useValue: notificationService },
         { provide: REDIS_CLIENT, useValue: null },
         { provide: MetricsService, useValue: { increment: jest.fn() } },
+        { provide: ArweaveArchiveService, useValue: { archive: jest.fn() } },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -101,7 +103,7 @@ describe('EscrowDisputeController', () => {
 
   it('rejects a caller who is not a party to the escrow with 403, leaving it untouched', async () => {
     await expect(
-      controller.raiseDispute('esc-001', { reason: 'x' }, req('GSTRANGER')),
+      controller.raiseDispute('esc-001', { reason: 'Work not delivered' }, req('GSTRANGER')),
     ).rejects.toThrow(ForbiddenException);
     expect(escrowService.raiseDispute).not.toHaveBeenCalled();
     expect(escrow.status).toBe('active');
@@ -112,7 +114,7 @@ describe('EscrowDisputeController', () => {
     async status => {
       escrow.status = status;
       await expect(
-        controller.raiseDispute('esc-001', { reason: 'x' }, req(DEPOSITOR)),
+        controller.raiseDispute('esc-001', { reason: 'Work not delivered' }, req(DEPOSITOR)),
       ).rejects.toThrow(BadRequestException);
       expect(escrowService.raiseDispute).not.toHaveBeenCalled();
     },
@@ -134,15 +136,19 @@ describe('EscrowDisputeController', () => {
       amountXLM: '100',
     });
     expect(discordService.notifyDisputeNeedsJurors).toHaveBeenCalledTimes(1);
-    expect(notificationService.notifyDisputeEscalated).toHaveBeenCalledTimes(1);
+    expect(notificationService.notifyDisputeEscalation).toHaveBeenCalledTimes(1);
   });
 
   it('a second dispute on the same escrow is rejected (active saga exists)', async () => {
-    const first = await controller.raiseDispute('esc-001', { reason: 'a' }, req(DEPOSITOR));
+    const first = await controller.raiseDispute(
+      'esc-001',
+      { reason: 'Depositor dispute' },
+      req(DEPOSITOR),
+    );
     const saga = await sagaService.findById(first.sagaId);
     expect(saga.currentStep).toBe(DisputeStep.JUROR_ASSIGNMENT);
     await expect(
-      controller.raiseDispute('esc-001', { reason: 'b' }, req(BENEFICIARY)),
+      controller.raiseDispute('esc-001', { reason: 'Beneficiary dispute' }, req(BENEFICIARY)),
     ).rejects.toThrow('An active dispute saga already exists');
   });
 });
