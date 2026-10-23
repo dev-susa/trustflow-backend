@@ -70,8 +70,7 @@ export class GigService implements OnModuleInit {
    * in-memory fallback so the app still runs without a local Redis.
    */
   onModuleInit(): void {
-    const isProd = (process.env.NODE_ENV ?? (typeof config !== 'undefined' ? config.NODE_ENV : undefined)) === 'production';
-    if (!this.redis && isProd) {
+    if (!this.redis && config.NODE_ENV === 'production') {
       throw new Error(
         'GigService requires REDIS_URL to be configured in production — refusing to start ' +
           'with per-instance in-memory storage, which would silently diverge across instances.',
@@ -271,7 +270,7 @@ export class GigService implements OnModuleInit {
       try {
         const result = await operation(gig);
         // Ensure in-memory fallback behaves like compare-and-set
-        if (!this.redis && result !== undefined) {
+        if (!this.redis) {
           const inMem = this.gigs.get(id);
           if (inMem && inMem.version !== currentVersion + 1) {
             throw new Error('In-memory transaction aborted');
@@ -378,8 +377,6 @@ export class GigService implements OnModuleInit {
    * resolved by the time the sweep reached it. Used by the expiry sweep worker.
    */
   async expire(id: string): Promise<Gig | undefined> {
-    const existing = await this.tryFindById(id);
-    if (!existing || existing.status !== GigStatus.OPEN) return undefined;
     return this.mutateWithRetry(id, async gig => {
       if (gig.status !== GigStatus.OPEN) return undefined;
       gig.status = GigStatus.EXPIRED;
@@ -497,16 +494,7 @@ export class GigService implements OnModuleInit {
   }
 
   private getSearchCacheTtlSeconds(): number {
-    const raw = process.env.GIG_SEARCH_CACHE_TTL_SECONDS;
-    if (raw !== undefined) {
-      const parsed = parseInt(raw, 10);
-      if (!Number.isNaN(parsed)) return parsed;
-    }
-    try {
-      return config.GIG_SEARCH_CACHE_TTL_SECONDS ?? DEFAULT_GIG_SEARCH_CACHE_TTL_SECONDS;
-    } catch {
-      return DEFAULT_GIG_SEARCH_CACHE_TTL_SECONDS;
-    }
+    return config.GIG_SEARCH_CACHE_TTL_SECONDS ?? DEFAULT_GIG_SEARCH_CACHE_TTL_SECONDS;
   }
 
   private async readSearchCache(key: string): Promise<PaginatedGigs | undefined> {
