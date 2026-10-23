@@ -220,9 +220,6 @@ export class DisputeSagaService implements OnModuleInit {
       if (escrow.status !== 'active' && escrow.status !== 'disputed') {
         throw new BadRequestException(`Cannot dispute a ${escrow.status} escrow`);
       }
-      if (origin === 'api' && escrow.status !== 'active') {
-        throw new BadRequestException('Only active escrows can start a dispute');
-      }
 
       // Verify that initiator is either depositor or beneficiary, unless this is a
       // chain-originated dispute with no reliable initiator (#463): the sentinel
