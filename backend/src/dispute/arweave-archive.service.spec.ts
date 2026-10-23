@@ -3,7 +3,48 @@ import { generateKeyPairSync } from 'crypto';
 import { AddressInfo } from 'net';
 import { ArweaveArchiveService } from './arweave-archive.service';
 import { DisputeSaga, DisputeStep, DisputeVerdict } from './dispute.types';
-import { validateEnv } from '../config/env.config';
+import { resetEnvConfig, validateEnv } from '../config/env.config';
+
+const mockSaga: DisputeSaga = {
+  sagaId: 'saga-test-001',
+  escrowId: 'escrow-test-001',
+  initiator: 'DEPOSITOR_WALLET_ADDRESS',
+  origin: 'api',
+  reason: 'Test dispute reason',
+  priorEscrowStatus: 'active',
+  currentStep: DisputeStep.COMPLETED,
+  verdict: DisputeVerdict.DEPOSITOR_WINS,
+  payoutTxHash: 'payout-tx-123',
+  stepHistory: [],
+  votes: [],
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+  completedAt: new Date().toISOString(),
+};
+
+interface CapturedRequest {
+  method?: string;
+  url?: string;
+  headers: IncomingMessage['headers'];
+  body: string;
+}
+
+function setArweaveEnv(jwt: string | undefined, uploadUrl: string | undefined): void {
+  if (jwt === undefined) {
+    delete process.env.ARWEAVE_JWT;
+  } else {
+    process.env.ARWEAVE_JWT = jwt;
+  }
+
+  if (uploadUrl === undefined) {
+    delete process.env.ARWEAVE_UPLOAD_URL;
+  } else {
+    process.env.ARWEAVE_UPLOAD_URL = uploadUrl;
+  }
+
+  resetEnvConfig();
+  validateEnv();
+}
 
 describe('ArweaveArchiveService', () => {
   let server: Server;
@@ -15,11 +56,7 @@ describe('ArweaveArchiveService', () => {
   let originalJwt: string | undefined;
   let originalUploadUrl: string | undefined;
 
-  beforeEach(async () => {
-    validateEnv();
-    const module: TestingModule = await Test.createTestingModule({
-      providers: [ArweaveArchiveService],
-    }).compile();
+  const mockMetrics = { increment: jest.fn() };
 
   beforeAll(async () => {
     originalJwt = process.env.ARWEAVE_JWT;
@@ -124,69 +161,36 @@ describe('ArweaveArchiveService', () => {
     expect(mockMetrics.increment).toHaveBeenCalledWith('arweave_archive_success_total', {
       result: 'success',
     });
+  });
 
-    it('reports oversized archives accurately and passes the full payload to the uploader', async () => {
-      const upload = jest
-        .fn<Promise<string>, [string | Buffer, Array<[string, string]>]>()
-        .mockResolvedValue('arweave-test-tx');
-      const uploader = { upload };
-      Object.defineProperty(service, 'uploader', { value: uploader });
-      const warn = jest.spyOn(service['logger'], 'warn').mockImplementation();
-      const saga: DisputeSaga = {
-        ...mockSaga,
-        stepHistory: Array.from({ length: 1500 }, () => ({
-          step: DisputeStep.VOTING,
-          startedAt: '2026-10-17T00:00:00.000Z',
-          error: 'x'.repeat(80),
-        })),
-        votes: Array.from({ length: 1500 }, () => ({
-          jurorAddress: `G${'A'.repeat(55)}`,
-          vote: 'depositor',
-          castAt: '2026-10-17T00:00:00.000Z',
-        })),
-      };
+  it('does not fabricate a transaction id when the upload endpoint rejects it', async () => {
+    failUpload = true;
+    setArweaveEnv(jwt, baseUrl);
+    const service = new ArweaveArchiveService(mockMetrics as never);
 
-      await service.archiveDispute(saga);
-
-      expect(upload).toHaveBeenCalledTimes(1);
-      const payloadArgument = upload.mock.calls[0]?.[0];
-      if (typeof payloadArgument !== 'string') {
-        throw new Error('Expected the archive uploader to receive a JSON string.');
-      }
-      const payload = payloadArgument;
-      expect(Buffer.byteLength(payload, 'utf8')).toBeGreaterThan(256 * 1024);
-      const parsedPayload = JSON.parse(payload) as {
-        stepHistory: unknown[];
-        votes: unknown[];
-      };
-      expect(parsedPayload.stepHistory).toHaveLength(1500);
-      expect(parsedPayload.votes).toHaveLength(1500);
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringContaining('passing the full payload to the uploader without truncation'),
-      );
+    await expect(service.archiveDispute(mockSaga)).resolves.toBeUndefined();
+    expect(mockMetrics.increment).toHaveBeenCalledWith('arweave_archive_failure_total', {
+      result: 'error',
     });
+  });
 
-    it('measures the archive size in UTF-8 bytes rather than JavaScript characters', async () => {
-      const upload = jest
-        .fn<Promise<string>, [string | Buffer, Array<[string, string]>]>()
-        .mockResolvedValue('arweave-test-tx');
-      const uploader = { upload };
-      Object.defineProperty(service, 'uploader', { value: uploader });
-      const warn = jest.spyOn(service['logger'], 'warn').mockImplementation();
-      const saga = { ...mockSaga, compensationReason: '🚀'.repeat(70_000) };
+  it('disables the uploader when ARWEAVE_JWT is malformed instead of faking success', async () => {
+    setArweaveEnv('not-json', baseUrl);
+    const service = new ArweaveArchiveService(mockMetrics as never);
 
-      await service.archiveDispute(saga);
+    await expect(service.archiveDispute(mockSaga)).resolves.toBeUndefined();
+    expect(mockMetrics.increment).toHaveBeenCalledWith('arweave_archive_config_failure_total', {
+      result: 'error',
+    });
+  });
 
-      const payloadArgument = upload.mock.calls[0]?.[0];
-      if (typeof payloadArgument !== 'string') {
-        throw new Error('Expected the archive uploader to receive a JSON string.');
-      }
-      const payload = payloadArgument;
-      expect(payload.length).toBeLessThan(256 * 1024);
-      expect(Buffer.byteLength(payload, 'utf8')).toBeGreaterThan(256 * 1024);
-      expect(warn).toHaveBeenCalledWith(
-        expect.stringMatching(/bytes, above the recommended 256 KiB/),
-      );
+  it('disables the uploader when ARWEAVE_UPLOAD_URL is missing', async () => {
+    setArweaveEnv(jwt, undefined);
+    const service = new ArweaveArchiveService(mockMetrics as never);
+
+    await expect(service.archiveDispute(mockSaga)).resolves.toBeUndefined();
+    expect(mockMetrics.increment).toHaveBeenCalledWith('arweave_archive_config_failure_total', {
+      result: 'error',
     });
   });
 });

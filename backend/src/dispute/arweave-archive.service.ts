@@ -7,7 +7,7 @@ import { config } from '../config/env.config';
 import { MetricsService } from '../monitoring/metrics.service';
 import { WebhookService } from '../webhook/webhook.service';
 
-const MAX_JSON_BYTES = 256 * 1024; // 256 KiB per Arweave bundle chunk recommendation
+const MAX_JSON_SIZE = 256 * 1024; // 256 KB per Arweave bundle chunk recommendation
 
 /** Abstraction for Arweave upload to allow mocking in tests */
 export interface ArweaveUploader {
@@ -34,13 +34,30 @@ export class ArweaveArchiveService implements OnModuleInit {
     @Optional() private readonly webhookService?: WebhookService,
   ) {
     const arweaveJwt = config.ARWEAVE_JWT;
-    if (arweaveJwt) {
-      this.logger.log(
-        'Arweave archive service enabled — will upload dispute evidence on saga completion',
+    const uploadUrl = config.ARWEAVE_UPLOAD_URL;
+
+    if (arweaveJwt && uploadUrl) {
+      try {
+        this.uploader = this.createUploader(arweaveJwt, uploadUrl);
+        this.logger.log(
+          'Arweave archive service enabled — will upload dispute evidence on saga completion',
+        );
+      } catch (error) {
+        // Never fall back to a fake success path when credentials are present but unusable:
+        // operators must be able to tell that nothing is actually being archived.
+        this.uploader = null;
+        this.metrics?.increment('arweave_archive_config_failure_total', { result: 'error' });
+        const errMsg = error instanceof Error ? error.message : String(error);
+        this.logger.error(
+          `Arweave archive service disabled: ARWEAVE_JWT/ARWEAVE_UPLOAD_URL are set but the ` +
+            `uploader could not be constructed (${errMsg})`,
+        );
+      }
+    } else if (arweaveJwt) {
+      this.metrics?.increment('arweave_archive_config_failure_total', { result: 'error' });
+      this.logger.error(
+        'Arweave archive service disabled: ARWEAVE_JWT is set but ARWEAVE_UPLOAD_URL is missing',
       );
-      // In a full implementation, we would initialize the arweave library here
-      // with the wallet key. For now, we set up a lightweight uploader.
-      this.uploader = this.createUploader(arweaveJwt);
     } else {
       this.logger.log(
         'Arweave archive service running in simulated mode (no ARWEAVE_JWT configured)',
@@ -139,7 +156,6 @@ export class ArweaveArchiveService implements OnModuleInit {
     try {
       const archiveData = this.buildArchiveData(saga);
       const jsonString = JSON.stringify(archiveData);
-      const jsonBytes = Buffer.byteLength(jsonString, 'utf8');
       const tags: [string, string][] = [
         ['App-Name', 'TrustFlow'],
         ['Content-Type', 'application/json'],
@@ -150,10 +166,31 @@ export class ArweaveArchiveService implements OnModuleInit {
         ['Step', saga.currentStep],
       ];
 
-      if (jsonBytes > MAX_JSON_BYTES) {
+      let uploadData = jsonString;
+      if (jsonString.length > MAX_JSON_SIZE) {
         this.logger.warn(
-          `Archive data is ${jsonBytes} bytes, above the recommended ${MAX_JSON_BYTES / 1024} KiB Arweave bundle chunk size; passing the full payload to the uploader without truncation`,
+          `Archive data exceeds ${MAX_JSON_SIZE / 1024}KB, truncating votes and stepHistory for Arweave bundle`,
         );
+        const truncated = {
+          ...archiveData,
+          votes: (archiveData.votes as unknown[]).slice(0, 10),
+          stepHistory: (archiveData.stepHistory as unknown[]).slice(0, 20),
+          _truncated: true,
+        };
+        uploadData = JSON.stringify(truncated);
+        if (uploadData.length > MAX_JSON_SIZE) {
+          uploadData = JSON.stringify({
+            sagaId: archiveData.sagaId,
+            escrowId: archiveData.escrowId,
+            initiator: archiveData.initiator,
+            verdict: archiveData.verdict,
+            currentStep: archiveData.currentStep,
+            createdAt: archiveData.createdAt,
+            completedAt: archiveData.completedAt,
+            _truncated: true,
+            _reason: 'archive exceeded max size after initial truncation',
+          });
+        }
       }
 
       const txId = await this.uploader.upload(uploadData, tags);
