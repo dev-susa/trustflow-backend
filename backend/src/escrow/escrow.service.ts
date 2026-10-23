@@ -384,8 +384,7 @@ export class EscrowService implements OnModuleInit {
     const escrow = await this.findById(id);
     if (!escrow) throw new NotFoundException('Escrow not found');
     if (escrow.status === 'released') throw new ConflictException('Escrow is already released');
-    if (escrow.status === 'cancelled')
-      throw new BadRequestException('Cannot release cancelled escrow');
+    if (escrow.status === 'cancelled') throw new ConflictException('Cannot release a cancelled escrow');
 
     const beforeState = { ...escrow };
     escrow.status = 'released';
@@ -411,8 +410,7 @@ export class EscrowService implements OnModuleInit {
     const escrow = await this.findById(id);
     if (!escrow) throw new NotFoundException('Escrow not found');
     if (escrow.status === 'cancelled') throw new ConflictException('Escrow is already cancelled');
-    if (escrow.status === 'released')
-      throw new BadRequestException('Cannot cancel released escrow');
+    if (escrow.status === 'released') throw new ConflictException('Cannot cancel a released escrow');
     escrow.status = 'cancelled';
     await this.persist(escrow, ESCROW_EVENTS.ESCROW_CANCELLED);
     return escrow;
@@ -422,8 +420,7 @@ export class EscrowService implements OnModuleInit {
     const escrow = await this.findById(id);
     if (!escrow) throw new NotFoundException('Escrow not found');
     if (escrow.status === 'released') throw new ConflictException('Escrow is already released');
-    if (escrow.status === 'cancelled')
-      throw new BadRequestException('Cannot split cancelled escrow');
+    if (escrow.status === 'cancelled') throw new ConflictException('Cannot split a cancelled escrow');
     escrow.status = 'released';
     escrow.splitPercentage = splitPercentage;
     await this.persist(escrow, ESCROW_EVENTS.ESCROW_SPLIT);

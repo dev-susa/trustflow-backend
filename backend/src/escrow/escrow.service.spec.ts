@@ -8,9 +8,6 @@ import {
 import { REDIS_CLIENT } from '../common/redis/redis.module';
 import { MetricsService } from '../monitoring/metrics.service';
 import { makeFakeRedisClient } from '../testing/fake-redis-client';
-import { validateEnv, resetEnvConfig } from '../config/env.config';
-
-validateEnv();
 
 // ─── Test suite ───────────────────────────────────────────────────────────────
 
@@ -576,27 +573,14 @@ describe('EscrowService', () => {
   });
 
   describe('onModuleInit', () => {
-    const originalEnv = { ...process.env };
+    const originalNodeEnv = process.env.NODE_ENV;
 
     afterEach(() => {
-      for (const k of Object.keys(process.env)) {
-        if (!(k in originalEnv)) {
-          delete process.env[k];
-        }
-      }
-      Object.assign(process.env, originalEnv);
-      resetEnvConfig();
-      validateEnv();
+      process.env.NODE_ENV = originalNodeEnv;
     });
 
     it('throws in production when Redis is not configured', async () => {
       process.env.NODE_ENV = 'production';
-      process.env.ALLOW_NO_REDIS = 'true';
-      process.env.CORS_ORIGIN = 'https://trustflow.io';
-      delete process.env.REDIS_URL;
-      process.env.JWT_SECRET = 'super-secret-key-that-is-long-enough';
-      resetEnvConfig();
-      validateEnv();
       service = await buildService(null);
 
       expect(() => service.onModuleInit()).toThrow(/requires REDIS_URL/);
@@ -604,11 +588,6 @@ describe('EscrowService', () => {
 
     it('does not throw in production when Redis is configured', async () => {
       process.env.NODE_ENV = 'production';
-      process.env.CORS_ORIGIN = 'https://trustflow.io';
-      process.env.REDIS_URL = 'redis://localhost:6379';
-      process.env.JWT_SECRET = 'super-secret-key-that-is-long-enough';
-      resetEnvConfig();
-      validateEnv();
       service = await buildService(makeFakeRedisClient());
 
       expect(() => service.onModuleInit()).not.toThrow();
@@ -616,8 +595,6 @@ describe('EscrowService', () => {
 
     it('does not throw outside production even without Redis', async () => {
       process.env.NODE_ENV = 'test';
-      resetEnvConfig();
-      validateEnv();
       service = await buildService(null);
 
       expect(() => service.onModuleInit()).not.toThrow();
