@@ -188,6 +188,8 @@ export class IpfsPinningService implements OnModuleInit {
       const provider = this.providers.find(p => p.name === providerName);
       if (!provider) continue;
 
+      // Health latency is the real time this provider took, success or failure (#801).
+      const startedAt = Date.now();
       try {
         // Execute pin with circuit breaker
         const entry = this.upsertProviderEntry(record, providerName);
@@ -226,7 +228,7 @@ export class IpfsPinningService implements OnModuleInit {
 
         // Record health success
         if (this.providerHealth) {
-          await this.providerHealth.recordPinSuccess(providerName, 5000); // approximate latency
+          await this.providerHealth.recordPinSuccess(providerName, Date.now() - startedAt);
         }
 
         // Check if we've reached the replication factor
@@ -239,7 +241,11 @@ export class IpfsPinningService implements OnModuleInit {
 
         // Record health failure
         if (this.providerHealth) {
-          await this.providerHealth.recordPinFailure(providerName, 5000, error as Error);
+          await this.providerHealth.recordPinFailure(
+            providerName,
+            Date.now() - startedAt,
+            error as Error,
+          );
         }
 
         this.logger.warn(
@@ -297,11 +303,12 @@ export class IpfsPinningService implements OnModuleInit {
     this.logger.log(`Starting background cross-pin to ${candidates.length} remaining providers for CID ${record.cid}`);
 
     for (const provider of candidates) {
+      const startedAt = Date.now();
       try {
         await this.pinWithProvider(record, provider, content);
         // Record health success for the cross-pin
         if (this.providerHealth) {
-          await this.providerHealth.recordPinSuccess(provider.name, 5000);
+          await this.providerHealth.recordPinSuccess(provider.name, Date.now() - startedAt);
         }
       } catch (error) {
         const errMsg = error instanceof Error ? error.message : String(error);
@@ -310,7 +317,11 @@ export class IpfsPinningService implements OnModuleInit {
         );
         // Record health failure for the cross-pin
         if (this.providerHealth) {
-          await this.providerHealth.recordPinFailure(provider.name, 5000, error as Error);
+          await this.providerHealth.recordPinFailure(
+            provider.name,
+            Date.now() - startedAt,
+            error as Error,
+          );
         }
         // Non-fatal — cross-pin best-effort only
       }
