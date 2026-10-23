@@ -104,6 +104,8 @@ export class EventDedupService {
       }
     }
 
+    // Make room for the entry about to be inserted, so the cache never exceeds its cap (#732).
+    this.evictOldest(LOCAL_MAX_ENTRIES - 1);
     this.local.set(eventId, now + GATEWAY_DEDUP_TTL_SECONDS * 1000);
     this.metrics?.increment(GATEWAY_DEDUP_CLAIMED_METRIC);
     return true;
@@ -114,9 +116,16 @@ export class EventDedupService {
     for (const [key, expiry] of this.local) {
       if (expiry <= now) this.local.delete(key);
     }
-    // Every entry shares one TTL, so insertion order is expiry order and the first keys are
-    // the oldest. Deleting from the front of a Map preserves the rest.
-    while (this.local.size > LOCAL_MAX_ENTRIES) {
+    this.evictOldest(LOCAL_MAX_ENTRIES);
+  }
+
+  /**
+   * Deletes the oldest entries until at most `limit` remain. Every entry shares one TTL, so
+   * insertion order is expiry order and the first keys are the oldest. Deleting from the
+   * front of a Map preserves the rest.
+   */
+  private evictOldest(limit: number): void {
+    while (this.local.size > limit) {
       const oldest = this.local.keys().next();
       if (oldest.done) break;
       this.local.delete(oldest.value);
