@@ -24,19 +24,12 @@ export class CacheService {
    * Connect to Redis — falls back to in-memory cache if unavailable or unset
    */
   private async connect(): Promise<void> {
-    let redisUrl: string | undefined;
-    try {
-      redisUrl = config.REDIS_URL;
-    } catch {
-      redisUrl = undefined;
-    }
-
+    const redisUrl = config?.REDIS_URL;
     if (!redisUrl) {
-      this.logger.warn('REDIS_URL not set — using in-memory cache fallback');
+      this.logger.log('REDIS_URL unset, using in-memory cache fallback');
       this.redisAvailable = false;
       return;
     }
-
     try {
       this.client = createClient({ url: redisUrl });
       this.client.on('error', err => {
