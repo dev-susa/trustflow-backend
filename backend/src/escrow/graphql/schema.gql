@@ -40,6 +40,15 @@ type EscrowPage {
   total: Int!
 }
 
+"""Lifecycle status of an escrow"""
+enum EscrowStatus {
+  active
+  cancelled
+  disputed
+  pending
+  released
+}
+
 type JurorVote {
   createdAt: String!
   deliverableId: String!

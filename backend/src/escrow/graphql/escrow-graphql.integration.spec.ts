@@ -1,7 +1,8 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
-import { INestApplication } from '@nestjs/common';
-import { EscrowGraphQLModule } from './escrow-graphql.module';
+import { Global, INestApplication, Module } from '@nestjs/common';
+import { validateEnv } from '../../config/env.config';
+import { REDIS_CLIENT } from '../../common/redis/redis.constants';
 import { EscrowService } from '../escrow.service';
 import { MilestoneLoader } from './dataloader/milestone.loader';
 import { DeliverableLoader } from './dataloader/deliverable.loader';
@@ -53,7 +54,7 @@ describe('EscrowGraphQL Integration', () => {
 
   beforeAll(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      imports: [EscrowGraphQLModule],
+      imports: [TestRedisModule, EscrowGraphQLModule],
     })
       .overrideProvider(EscrowService)
       .useValue(mockEscrowService)
