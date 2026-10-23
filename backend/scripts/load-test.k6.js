@@ -64,15 +64,14 @@ function generateWalletAddress() {
 }
 
 /**
- * Generate random escrow data
+ * Generate random escrow data matching CreateEscrowSchema (depositor, beneficiary, amountXLM).
+ * The global ValidationPipe uses forbidNonWhitelisted, so any extra field is a 400.
  */
 function generateEscrowData() {
   return {
-    client: generateWalletAddress(),
-    freelancer: generateWalletAddress(),
-    amount: Math.floor(Math.random() * 10000) + 1000,
-    description: `Load test escrow ${Date.now()}-${Math.random()}`,
-    deadline: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+    depositor: generateWalletAddress(),
+    beneficiary: generateWalletAddress(),
+    amountXLM: String(Math.floor(Math.random() * 10000) + 1000),
   };
 }
 
@@ -88,7 +87,7 @@ export default function () {
     const createStart = Date.now();
 
     const createResponse = http.post(
-      `${BASE_URL}/api/${API_VERSION}/escrow`,
+      `${BASE_URL}/${API_VERSION}/escrows`,
       JSON.stringify(escrowData),
       {
         headers: {
@@ -126,7 +125,7 @@ export default function () {
     const escrowId = `escrow-${Math.floor(Math.random() * 1000)}`;
     const statusStart = Date.now();
 
-    const statusResponse = http.get(`${BASE_URL}/api/${API_VERSION}/escrow/${escrowId}`, {
+    const statusResponse = http.get(`${BASE_URL}/${API_VERSION}/escrows/${escrowId}`, {
       tags: { name: 'GetEscrowStatus' },
     });
 
@@ -148,10 +147,11 @@ export default function () {
     const registerStart = Date.now();
 
     const registerResponse = http.post(
-      `${BASE_URL}/api/${API_VERSION}/webhooks/register`,
+      `${BASE_URL}/${API_VERSION}/webhooks`,
       JSON.stringify({
+        id: userId,
         url: webhookUrl,
-        events: ['escrow.created', 'escrow.completed'],
+        events: ['escrow.created', 'escrow.released'],
       }),
       {
         headers: {
