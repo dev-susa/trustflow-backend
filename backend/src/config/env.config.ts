@@ -155,12 +155,22 @@ const EnvSchema = z
     DB_POOL_MAX: optionalPositiveInt(),
     DB_POOL_IDLE_TIMEOUT_MS: optionalPositiveInt(),
     DB_POOL_CONNECTION_TIMEOUT_MS: optionalPositiveInt(),
-    DB_RETRY_ATTEMPTS: z.coerce.number().int().positive().default(5).describe(
-      'Maximum number of connection retry attempts during pool initialization. Default 5.',
-    ),
-    DB_RETRY_BACKOFF_MS: z.coerce.number().int().positive().default(1000).describe(
-      'Base delay in milliseconds for exponential backoff between connection retries. Default 1000ms.',
-    ),
+    DB_RETRY_ATTEMPTS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(5)
+      .describe(
+        'Maximum number of connection retry attempts during pool initialization. Default 5.',
+      ),
+    DB_RETRY_BACKOFF_MS: z.coerce
+      .number()
+      .int()
+      .positive()
+      .default(1000)
+      .describe(
+        'Base delay in milliseconds for exponential backoff between connection retries. Default 1000ms.',
+      ),
 
     SWAGGER_ENABLED: optionalBool().describe(
       'Serve Swagger UI and the OpenAPI JSON; defaults to true outside production, false in production',
